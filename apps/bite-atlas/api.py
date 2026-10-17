@@ -5,17 +5,24 @@ FastAPI backend for Databricks Apps. All endpoints under /api/.
 from __future__ import annotations
 
 import json
+import logging
+import os
+from functools import lru_cache
+from pathlib import Path
 import uuid
 from datetime import datetime
 from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 
 from databricks.sdk import WorkspaceClient
-from databricks.sdk.service.sql import State
+from databricks.sdk.service.sql import State, StatementParameterListItem
+from scout import ScoutRequest, scout
+from scout_routes import enrich_routes
 
 app = FastAPI(
     title="Bite Atlas API",
@@ -31,8 +38,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-w = WorkspaceClient()
-WAREHOUSE_ID = "9e05797dcc5646b3"
+@lru_cache(maxsize=1)
+def get_client():
+    return WorkspaceClient()
+
+WAREHOUSE_ID = os.environ.get("DATABRICKS_WAREHOUSE_ID", "9e05797dcc5646b3")
 
 
 def _state_str(state: Any) -> str:
@@ -46,27 +56,28 @@ def _state_str(state: Any) -> str:
 
 def ensure_warehouse() -> None:
     import time
-    wh = w.warehouses.get(WAREHOUSE_ID)
+    wh = get_client().warehouses.get(WAREHOUSE_ID)
     if _state_str(wh.state) == "RUNNING":
         return
     if _state_str(wh.state) in ("STOPPED", "STOPPING"):
-        w.warehouses.start(WAREHOUSE_ID)
+        get_client().warehouses.start(WAREHOUSE_ID)
     for _ in range(30):
         time.sleep(2)
-        wh = w.warehouses.get(WAREHOUSE_ID)
+        wh = get_client().warehouses.get(WAREHOUSE_ID)
         if _state_str(wh.state) == "RUNNING":
             return
     raise RuntimeError(f"Warehouse {WAREHOUSE_ID} did not reach RUNNING within 60 s")
 
 
-def run_sql(sql: str, timeout: str = "50s") -> list[dict[str, Any]]:
+def run_sql(sql: str, timeout: str = "50s", parameters: dict | None = None) -> list[dict[str, Any]]:
     ensure_warehouse()
     import time
 
-    resp = w.statement_execution.execute_statement(
+    resp = get_client().statement_execution.execute_statement(
         warehouse_id=WAREHOUSE_ID,
         statement=sql,
         wait_timeout=timeout,
+        parameters=[StatementParameterListItem(name=k, value=str(v), type="STRING") for k, v in (parameters or {}).items()],
     )
     statement_id = resp.statement_id
     if not statement_id:
@@ -80,13 +91,13 @@ def run_sql(sql: str, timeout: str = "50s") -> list[dict[str, Any]]:
             diag = str(uuid.uuid4())[:8]
             raise RuntimeError(f"SQL statement timed out after 120 s (diag={diag})")
         time.sleep(2)
-        resp = w.statement_execution.get_statement(statement_id)
+        resp = get_client().statement_execution.get_statement(statement_id)
 
     state = _state_str(resp.status.state) if resp.status else ""
 
     if state == "FAILED":
         diag = str(uuid.uuid4())[:8]
-        err = resp.status.error_message or "SQL execution failed"
+        err = getattr(getattr(resp.status, "error", None), "message", None) or "SQL execution failed"
         raise RuntimeError(f"{err} (diag={diag})")
 
     if state == "CANCELED":
@@ -99,17 +110,17 @@ def run_sql(sql: str, timeout: str = "50s") -> list[dict[str, Any]]:
     if not resp.result:
         return []
 
-    # Collect data including chunked external links
+    # Follow SDK result chunks; never fetch arbitrary external URLs with app credentials.
     chunks = list(resp.result.data_array or [])
-    ext_links = getattr(resp.result, "external_links", None) or []
-    for link in ext_links:
-        link_url = getattr(link, "external_link", None) or getattr(link, "link", None)
-        if not link_url:
-            continue
-        import urllib.request
-        with urllib.request.urlopen(link_url) as r:
-            chunk_data = json.loads(r.read().decode("utf-8"))
-            chunks.extend(chunk_data.get("data_array", []))
+    chunk_index = resp.result.next_chunk_index
+    seen_chunks = set()
+    while chunk_index is not None:
+        if chunk_index in seen_chunks:
+            raise RuntimeError("SQL results contained a repeated chunk")
+        seen_chunks.add(chunk_index)
+        chunk = get_client().statement_execution.get_statement_result_chunk_n(statement_id, chunk_index)
+        chunks.extend(chunk.data_array or [])
+        chunk_index = chunk.next_chunk_index
 
     if not chunks:
         return []
@@ -137,8 +148,8 @@ def sql_str(val: Any) -> str:
 
 
 class SearchRequest(BaseModel):
-    latitude: float = 35.9
-    longitude: float = -79.0
+    latitude: float = Field(default=35.9, ge=-90, le=90, allow_inf_nan=False)
+    longitude: float = Field(default=-79.0, ge=-180, le=180, allow_inf_nan=False)
     radius_km: float = 50.0
     mode: str = "any"
     species: str = ""
@@ -179,7 +190,7 @@ def species():
 
 
 @app.post("/api/search")
-async def search(request: SearchRequest):
+def search(request: SearchRequest):
     lat = request.latitude
     lon = request.longitude
     radius = request.radius_km
@@ -254,7 +265,7 @@ async def search(request: SearchRequest):
     # Label access status and enrich with access point details
     for r in rows:
         if r.get("access_point_count", 0) > 0:
-            r["access_status"] = "verified"
+            r["access_status"] = "mapped_access_requires_verification"
         else:
             r["access_status"] = "unknown"
 
@@ -478,3 +489,30 @@ async def create_user_report(report: UserReportCreate):
 @app.get("/api/openapi.json")
 def openapi():
     return app.openapi()
+
+
+@app.exception_handler(RuntimeError)
+async def sql_failure(request: Request, exc: RuntimeError):
+    diagnostic_id = str(uuid.uuid4())
+    logging.getLogger(__name__).exception("Backend operation failed diag=%s", diagnostic_id, exc_info=exc)
+    return JSONResponse({"error": "The data operation failed. Check server logs with the diagnostic ID.",
+                         "diagnostic_id": diagnostic_id}, status_code=503)
+
+
+@app.post("/api/scout")
+def scout_endpoint(request: ScoutRequest):
+    return enrich_routes(scout(request, run_sql))
+
+
+STATIC_DIR = Path(__file__).parent / "static"
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+@app.get("/", include_in_schema=False)
+def home():
+    return FileResponse(STATIC_DIR / "scout.html")
+
+
+@app.get("/legacy", include_in_schema=False)
+def legacy():
+    return FileResponse(STATIC_DIR / "index.html")

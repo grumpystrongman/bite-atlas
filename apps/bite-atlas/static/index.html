@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Bite Atlas</title>
+<style>
+:root{--forest:#1b4332;--teal:#2d6a4f;--light-teal:#52b788;--orange:#e76f51;--bg:#f8f9fa;--card:#fff;--text:#1a1a2e;--muted:#6c757d}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text);max-width:100vw;overflow-x:hidden;padding-bottom:70px}
+.app-header{background:var(--forest);color:#fff;padding:16px 20px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:100}
+.app-header h1{font-size:20px;font-weight:700}
+.app-header .logo{font-size:28px}
+.nav{position:fixed;bottom:0;left:0;right:0;background:var(--forest);display:flex;z-index:100;box-shadow:0 -2px 10px rgba(0,0,0,.1)}
+.nav button{flex:1;background:none;border:none;color:rgba(255,255,255,.5);padding:10px 4px;font-size:11px;display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer;transition:color .2s}
+.nav button.active{color:var(--light-teal)}
+.nav button .icon{font-size:22px}
+.view{display:none;padding:16px}
+.view.active{display:block}
+.card{background:var(--card);border-radius:12px;padding:16px;margin-bottom:12px;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+.card h3{color:var(--forest);font-size:16px;margin-bottom:8px}
+.form-group{margin-bottom:12px}
+.form-group label{display:block;font-size:13px;color:var(--muted);margin-bottom:4px;font-weight:600}
+.form-group input,.form-group select,.form-group textarea{width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:8px;font-size:15px;background:#fff}
+.btn{background:var(--orange);color:#fff;border:none;padding:12px 24px;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;width:100%}
+.btn:active{opacity:.85}
+.prediction{border-left:4px solid var(--light-teal);padding:12px;margin-bottom:8px;background:#f0f7f4;border-radius:0 8px 8px 0}
+.prediction .species{font-weight:700;color:var(--forest);font-size:15px}
+.prediction .score{float:right;font-size:12px;padding:2px 8px;border-radius:10px}
+.score-high{background:#d4edda;color:#155724}.score-moderate{background:#fff3cd;color:#856404}.score-low{background:#f8d7da;color:#721c24}
+.prediction .details{font-size:13px;color:var(--muted);margin-top:4px}
+.prediction .llm{font-size:12px;color:var(--text);margin-top:6px;padding:8px;background:#fff;border-radius:6px;line-height:1.4}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;margin:2px}
+.badge-teal{background:var(--light-teal);color:#fff}.badge-orange{background:var(--orange);color:#fff}
+.empty{text-align:center;padding:40px 20px;color:var(--muted)}
+.empty .icon{font-size:48px;display:block;margin-bottom:12px}
+.loading{text-align:center;padding:30px;color:var(--muted)}
+.waterbody-item{padding:12px;border-bottom:1px solid #eee;cursor:pointer}
+.waterbody-item:hover{background:#f0f7f4}
+.waterbody-item .name{font-weight:600;color:var(--forest)}
+.waterbody-item .meta{font-size:12px;color:var(--muted);margin-top:2px}
+.health-item{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #eee}
+.health-dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:8px}
+.dot-green{background:#28a745}.dot-yellow{background:#ffc107}.dot-red{background:#dc3545}.dot-gray{background:#6c757d}
+.species-card{background:var(--card);border-radius:12px;padding:16px;margin-bottom:12px}
+.species-card h4{color:var(--forest);margin-bottom:6px}
+.species-card .info{font-size:13px;color:var(--muted);line-height:1.5}
+.report-item{padding:10px;border-bottom:1px solid #eee}
+.report-item .species{font-weight:600;color:var(--forest)}
+.report-item .meta{font-size:12px;color:var(--muted)}
+#map-container{height:400px;background:#e8f5e9;border-radius:12px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:14px;margin-bottom:16px}
+@media(min-width:768px){.view{max-width:600px;margin:0 auto}.nav{max-width:600px;left:50%;transform:translateX(-50%)}}
+</style>
+</head>
+<body>
+<div class="app-header">
+<span class="logo">🎣</span>
+<h1>Bite Atlas</h1>
+</div>
+
+<!-- EXPLORE VIEW -->
+<div class="view active" id="view-explore">
+<div class="card">
+<div class="form-group"><label>Latitude</label><input type="number" id="exp-lat" value="35.9" step="0.01"></div>
+<div class="form-group"><label>Longitude</label><input type="number" id="exp-lon" value="-79.0" step="0.01"></div>
+<div class="form-group"><label>Radius (km)</label><input type="number" id="exp-radius" value="50"></div>
+<div class="form-group"><label>Fishing Mode</label><select id="exp-mode"><option value="">Any</option><option value="bank">Bank</option><option value="kayak">Kayak</option><option value="boat">Boat</option></select></div>
+<button class="btn" onclick="exploreSearch()">Search Waters</button>
+</div>
+<div id="explore-results"></div>
+</div>
+
+<!-- MAP VIEW -->
+<div class="view" id="view-map">
+<div class="card">
+<h3>🗺️ NC Fishing Map</h3>
+<div id="map-container">Map loading... Tap Explore to find waters near you.</div>
+</div>
+<div class="card">
+<h3>Available Layers</h3>
+<div id="map-layers"></div>
+</div>
+</div>
+
+<!-- PLANS VIEW -->
+<div class="view" id="view-plans">
+<div class="card">
+<div class="form-group"><label>Select Waterbody</label>
+<select id="plan-waterbody" onchange="loadPredictions()"><option value="">Choose...</option></select></div>
+</div>
+<div id="plan-results"><div class="empty"><span class="icon">📋</span>Select a waterbody to see fishing predictions</div></div>
+</div>
+
+<!-- NOTEBOOK VIEW -->
+<div class="view" id="view-notebook">
+<div class="card">
+<h3>📝 Log a Catch or Observation</h3>
+<div class="form-group"><label>Species</label><input type="text" id="rep-species" placeholder="Largemouth Bass"></div>
+<div class="form-group"><label>Waterbody</label><input type="text" id="rep-waterbody" placeholder="Jordan Lake"></div>
+<div class="form-group"><label>Catch Count</label><input type="number" id="rep-count" value="1"></div>
+<div class="form-group"><label>Length (cm)</label><input type="number" id="rep-length" step="0.1"></div>
+<div class="form-group"><label>Gear Type</label><select id="rep-gear"><option value="spinning">Spinning</option><option value="baitcasting">Baitcasting</option><option value="fly">Fly</option><option value="bottom">Bottom Rig</option></select></div>
+<div class="form-group"><label>Bait/Lure</label><input type="text" id="rep-bait" placeholder="Texas worm"></div>
+<div class="form-group"><label>Depth (ft)</label><input type="number" id="rep-depth"></div>
+<div class="form-group"><label>Notes</label><textarea id="rep-notes" rows="2" placeholder="Conditions, technique, etc."></textarea></div>
+<div class="form-group"><label>Photo</label><input type="file" id="rep-photo" accept="image/*"></div>
+<button class="btn" onclick="saveReport()">Save Report</button>
+<div id="save-status"></div>
+</div>
+<div class="card"><h3>Recent Reports</h3><div id="reports-list"></div></div>
+</div>
+
+<!-- SCIENCE VIEW -->
+<div class="view" id="view-science">
+<div class="card"><h3>🔬 Species Ecology</h3><div id="species-list"></div></div>
+<div class="card"><h3>📊 Source Health</h3><div id="health-list"></div></div>
+</div>
+
+<!-- NAV -->
+<nav class="nav">
+<button class="active" onclick="showView('explore',this)"><span class="icon">🔍</span>Explore</button>
+<button onclick="showView('map',this)"><span class="icon">🗺️</span>Map</button>
+<button onclick="showView('plans',this)"><span class="icon">📋</span>Plans</button>
+<button onclick="showView('notebook',this)"><span class="icon">📝</span>Notes</button>
+<button onclick="showView('science',this)"><span class="icon">🔬</span>Science</button>
+</nav>
+
+<script>
+const API='/api';
+function showView(id,btn){document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));document.getElementById('view-'+id).classList.add('active');btn.classList.add('active');if(id==='science')loadScience();if(id==='notebook')loadReports();if(id==='map')loadMap();if(id==='plans')loadWaterbodyList();}
+
+async function api(path){try{const r=await fetch(API+path);if(!r.ok)throw new Error(r.status);return await r.json();}catch(e){console.error('API error',e);return null;}}
+
+async function exploreSearch(){
+const lat=document.getElementById('exp-lat').value;const lon=document.getElementById('exp-lon').value;
+const radius=document.getElementById('exp-radius').value;const mode=document.getElementById('exp-mode').value;
+const el=document.getElementById('explore-results');el.innerHTML='<div class="loading">Searching...</div>';
+let url=`/explore?lat=${lat}&lon=${lon}&radius_km=${radius}`;
+if(mode)url+=`&mode=${mode}`;
+const data=await api(url);
+if(!data||!data.waterbodies){el.innerHTML='<div class="empty"><span class="icon">🐟</span>No waters found. Try expanding your search radius.</div>';return;}
+el.innerHTML=data.waterbodies.map(w=>`
+<div class="waterbody-item" onclick="selectWaterbody('${w.waterbody_id}','${w.canonical_name}')">
+<div class="name">${w.canonical_name}</div>
+<div class="meta">${w.waterbody_type||''} • ${w.surface_area_acres?Math.round(w.surface_area_acres):''} acres • ${w.distance_km?w.distance_km.toFixed(1):''}km • ${w.access_count||0} access pts</div>
+${w.predictions&&w.predictions.length>0?`<div style="margin-top:4px">${w.predictions.slice(0,3).map(p=>`<span class="badge badge-teal">${p.species_name}</span>`).join('')}</div>`:''}
+</div>`).join('');
+}
+
+function selectWaterbody(id,name){showView('plans',document.querySelectorAll('.nav button')[2]);const sel=document.getElementById('plan-waterbody');for(let o of sel.options){if(o.value===id){sel.value=id;break;}}if(![...sel.options].some(o=>o.value===id)){sel.add(new Option(name,id));sel.value=id;}loadPredictions();}
+
+async function loadWaterbodyList(){const sel=document.getElementById('plan-waterbody');if(sel.options.length>1)return;const data=await api('/explore?lat=35.9&lon=-79.0&radius_km=200');if(data&&data.waterbodies){data.waterbodies.forEach(w=>sel.add(new Option(w.canonical_name,w.waterbody_id)));}}
+
+async function loadPredictions(){const wb=document.getElementById('plan-waterbody').value;if(!wb)return;const el=document.getElementById('plan-results');el.innerHTML='<div class="loading">Loading predictions...</div>';
+const data=await api(`/predictions?waterbody_id=${wb}`);
+if(!data||!data.predictions||data.predictions.length===0){el.innerHTML='<div class="empty"><span class="icon">🐟</span>No predictions available for this waterbody. Predictions require weather forecast data.</div>';return;}
+el.innerHTML=data.predictions.map(p=>{const cls=p.activity_level==='high'?'score-high':p.activity_level==='moderate'?'score-moderate':'score-low';return `
+<div class="prediction">
+<div><span class="species">${p.species_name}</span><span class="score ${cls}">${p.activity_level||''}</span></div>
+<div class="details">${p.time_window||''} • Water est ${p.water_temp_estimate?Math.round(p.water_temp_estimate):'?'}°F • Wind ${p.wind_speed_forecast||'?'}mph • ${p.moon_phase||''}</div>
+<div class="details"><strong>Use:</strong> ${p.recommended_lure_bait||'N/A'} • ${p.recommended_rig||''} • ${p.recommended_depth||''}</div>
+<div class="details"><strong>Technique:</strong> ${p.recommended_technique||'N/A'}</div>
+<div class="details"><strong>Spot:</strong> ${p.best_access_point||'Nearest access'} (${p.best_access_type||''}) • ${p.target_lat?p.target_lat.toFixed(4):''}, ${p.target_lon?p.target_lon.toFixed(4):''}</div>
+${p.llm_explanation?`<div class="llm">${p.llm_explanation}</div>`:''}
+${p.uncertainty_notes?`<div class="details" style="color:#e76f51">⚠️ ${p.uncertainty_notes}</div>`:''}
+</div>`;}).join('');}
+
+async function loadMap(){const el=document.getElementById('map-layers');el.innerHTML='<div class="loading">Loading layers...</div>';const data=await api('/map/layers');if(data&&data.layers){el.innerHTML=data.layers.map(l=>`<div class="waterbody-item"><span class="name">${l.name}</span><span class="meta">${l.count.toLocaleString()} features</span> ${l.available?'<span class="badge badge-teal">Available</span>':'<span class="badge badge-orange">Limited</span>'}</div>`).join('');}
+const mc=document.getElementById('map-container');const wb=await api('/map/waterbodies?lat=35.5&lon=-79.0&radius_km=100');if(wb&&wb.waterbodies){mc.innerHTML=`<div style="padding:16px;text-align:center"><strong>${wb.waterbodies.length}</strong> waterbodies in view<br><small style="color:var(--muted)">Top: ${wb.waterbodies.slice(0,5).map(w=>w.canonical_name).join(', ')}</small></div>`;}}
+
+async function saveReport(){const fd=new FormData();const fields=['species','waterbody','count','length','gear','bait','depth','notes'];const ids={species:'rep-species',waterbody:'rep-waterbody',count:'rep-count',length:'rep-length',gear:'rep-gear',bait:'rep-bait',depth:'rep-depth',notes:'rep-notes'};
+for(let k in ids){const v=document.getElementById(ids[k]).value;if(v)fd.append(k.replace('species','species_name').replace('waterbody','waterbody_name').replace('count','catch_count').replace('length','catch_length_cm').replace('gear','gear_type').replace('bait','bait_lure').replace('depth','depth_ft').replace('notes','notes'),v);}
+const photo=document.getElementById('rep-photo').files[0];if(photo)fd.append('photo',photo);
+document.getElementById('save-status').innerHTML='<div class="loading">Saving...</div>';
+try{const r=await fetch(API+'/reports',{method:'POST',body:fd});const d=await r.json();if(r.ok){document.getElementById('save-status').innerHTML='<div style="color:#28a745;padding:8px">✅ Saved! Report ID: '+d.report_id+'</div>';['rep-species','rep-waterbody','rep-count','rep-length','rep-bait','rep-depth','rep-notes'].forEach(id=>document.getElementById(id).value='');loadReports();}else{document.getElementById('save-status').innerHTML='<div style="color:#dc3545;padding:8px">❌ '+d.detail||'Save failed'+'</div>';}}catch(e){document.getElementById('save-status').innerHTML='<div style="color:#dc3545;padding:8px">❌ Network error: '+e.message+'</div>';}}
+
+async function loadReports(){const el=document.getElementById('reports-list');el.innerHTML='<div class="loading">Loading...</div>';const data=await api('/reports');if(!data||!data.reports||data.reports.length===0){el.innerHTML='<div class="empty">No reports yet. Log your first catch above!</div>';return;}
+el.innerHTML=data.reports.map(r=>`<div class="report-item"><span class="species">${r.species_name||'Unknown'}</span> • <span class="meta">${r.waterbody_name||''} • ${r.catch_count||0} caught • ${r.gear_type||''} • ${r.report_datetime?new Date(r.report_datetime).toLocaleDateString():''}</span>${r.notes?'<br><small>'+r.notes+'</small>':''}</div>`).join('');}
+
+async function loadScience(){const sp=document.getElementById('species-list');sp.innerHTML='<div class="loading">Loading...</div>';const data=await api('/species');if(data&&data.species){sp.innerHTML=data.species.map(s=>`<div class="species-card"><h4>${s.species_name}</h4><div class="info"><strong>Temp:</strong> ${s.temperature_range||'N/A'}<br><strong>Habitat:</strong> ${s.habitat||'N/A'}<br><strong>Lure/Bait:</strong> ${s.lure_bait||'N/A'}<br><strong>Rig:</strong> ${s.rig_tackle||'N/A'}<br><strong>Depth:</strong> ${s.depth_strategy||'N/A'}<br><strong>Technique:</strong> ${s.techniques||'N/A'}<br><strong>Season:</strong> ${s.seasonal_behavior||'N/A'}</div></div>`).join('');}
+const hl=document.getElementById('health-list');const h=await api('/health');if(h&&h.sources){hl.innerHTML=h.sources.map(s=>{const dot=s.health_status==='healthy'?'dot-green':s.health_status==='stale'?'dot-yellow':s.health_status==='down'?'dot-red':'dot-gray';return `<div class="health-item"><div><span class="health-dot ${dot}"></span>${s.source_name}</div><span class="meta">${s.agency||''} • ${s.health_status||'unknown'}</span></div>`;}).join('');}}
+</script>
+</body>
+</html>
